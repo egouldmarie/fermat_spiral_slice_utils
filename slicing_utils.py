@@ -85,19 +85,17 @@ def get_corner(t, outer_curve, inner_curve, points):
     return closest["point"]
 
 
-def get_isocontours(t, curves, parent, precision, wall_mode=False, walls=3):
+def get_isocontours(t, curves, depth, precision, wall_mode=False, walls=3):
     new_curves = get_isocontour(t, curves, precision)
     if not new_curves:
         return []
     else:
         all_curves = [] + new_curves
-        new_depth = parent["depth"]+1
+        new_depth = depth+1
         if not wall_mode or (wall_mode and new_depth <= walls):
             new_curves = get_curve_groupings(new_curves)
             for cs in new_curves:
-                node = {"guid":cs, "depth":new_depth, "parent":parent, "children":[]}
-                parent["children"].append(node)
-                new_new_curves = get_isocontours(t, cs, node, precision, wall_mode=wall_mode, walls=walls)
+                new_new_curves = get_isocontours(t, cs, new_depth, precision, wall_mode=wall_mode, walls=walls)
                 for nc in new_new_curves:
                     all_curves.append(nc)
         return all_curves
@@ -464,6 +462,57 @@ def fill_region(region_node, node, idx):
                 idx = idx + 1
 
 
+def get_curve_groupings(curves):
+    # find curve groupings from intersection of shape with plane
+    # curves can represent the inside of a surface or potentially
+    # a nested curve within another set of curves defining a surface
+    all_points = [rs.DivideCurve(curve, 100) for curve in curves]
+    inside = {c:{c2:all([rs.PointInPlanarClosedCurve(p, curves[c2]) for p in all_points[c]]) for c2 in range(len(curves)) if c2 != c} for c in range(len(curves))}
+    outer_curves = [c for c in range(len(curves)) if not any([inside[c][k] for k in inside[c]])]
+    inner_curves = [c for c in range(len(curves)) if c not in outer_curves]
+
+    iteration = 0
+    curve_groupings = {c:[] for c in outer_curves}
+    while len(inner_curves) > 0:
+        if iteration > 30: break
+        iteration = iteration+1
+        next_group = []
+        for c in outer_curves:
+            for c2 in inner_curves:
+                if inside[c2][c] and all([inside[c2][c3] == inside[c][c3] for c3 in inside[c2] if c3 != c]):
+                    curve_groupings[c].append(c2)
+                    next_group.append(c2)
+                    inner_curves.remove(c2)
+
+        outer_curves = []
+        for c in next_group:
+            for c2 in inner_curves:
+                if inside[c2][c] and all([inside[c2][c3] == inside[c][c3] for c3 in inside[c2] if c3 != c]):
+                    outer_curves.append(c2)
+                    curve_groupings[c2] = []
+                    inner_curves.remove(c2)
+
+    groups = [[c]+curve_groupings[c] for c in curve_groupings]
+    curves = [[curves[c] for c in g] for g in groups]
+    return curves
+
+
+def tree_isocontours(root, isocontours):
+    # find outermost contours
+    all_points = [rs.DivideCurve(curve, 100) for curve in isocontours]
+    inside = {c:{c2:all([rs.PointInPlanarClosedCurve(p, isocontours[c2]) for p in all_points[c]]) for c2 in range(len(isocontours)) if c2 != c} for c in range(len(isocontours))}
+    outer_isocontours = [c for c in range(len(isocontours)) if not any([inside[c][k] for k in inside[c]])]
+
+    for c in outer_isocontours:
+        node = {"guid":c, "depth":root["depth"]+1, "children":[]}
+        root["children"].append(node)
+        find_children(node, isocontours, inside)
+
+
+def find_children(parent, isocontours, inside):
+    print()
+
+
 def connect_spiralled_nodes(t, root):
     find_connections(t, root)
     all_nodes = get_all_nodes(root)
@@ -666,41 +715,6 @@ def get_connection_indices(t, node):
     return start_index, end_index
 
 
-def get_curve_groupings(curves):
-    # find curve groupings from intersection of shape with plane
-    # curves can represent the inside of a surface or potentially
-    # a nested curve within another set of curves defining a surface
-    all_points = [rs.DivideCurve(curve, 100) for curve in curves]
-    inside = {c:{c2:all([rs.PointInPlanarClosedCurve(p, curves[c2]) for p in all_points[c]]) for c2 in range(len(curves)) if c2 != c} for c in range(len(curves))}
-    outer_curves = [c for c in range(len(curves)) if not any([inside[c][k] for k in inside[c]])]
-    inner_curves = [c for c in range(len(curves)) if c not in outer_curves]
-
-    iteration = 0
-    curve_groupings = {c:[] for c in outer_curves}
-    while len(inner_curves) > 0:
-        if iteration > 30: break
-        iteration = iteration+1
-        next_group = []
-        for c in outer_curves:
-            for c2 in inner_curves:
-                if inside[c2][c] and all([inside[c2][c3] == inside[c][c3] for c3 in inside[c2] if c3 != c]):
-                    curve_groupings[c].append(c2)
-                    next_group.append(c2)
-                    inner_curves.remove(c2)
-
-        outer_curves = []
-        for c in next_group:
-            for c2 in inner_curves:
-                if inside[c2][c] and all([inside[c2][c3] == inside[c][c3] for c3 in inside[c2] if c3 != c]):
-                    outer_curves.append(c2)
-                    curve_groupings[c2] = []
-                    inner_curves.remove(c2)
-
-    groups = [[c]+curve_groupings[c] for c in curve_groupings]
-    curves = [[curves[c] for c in g] for g in groups]
-    return curves
-
-
 def fill_layer_with_fermat_spiral(t, shape, z, start_pnt=None, wall_mode=False, walls=3):
     # get outer curves of shape
     plane = get_plane(z)
@@ -713,15 +727,15 @@ def fill_layer_with_fermat_spiral(t, shape, z, start_pnt=None, wall_mode=False, 
     # slice the shape
     print("Generating Isocontours")
     precision = 300
-    root = {"guid": "root", "depth": 0, "children":[]}
-    isocontour_layers = []
+    isocontours = []
     for curve_group in curves:
-        isocontour_layers.append(curve_group)
-        node = {"guid": curve_group, "depth": root["depth"]+1, "parent": root, "children":[]}
-        root["children"].append(node)
-        new_curves = get_isocontours(t, curve_group, node, precision, wall_mode, walls)
+        isocontours = isocontours + curve_group
+        new_curves = get_isocontours(t, curve_group, 1, precision, wall_mode, walls)
         if new_curves:
-            isocontour_layers[-1] = isocontour_layers[-1] + new_curves
+            isocontours = isocontours + new_curves
+
+    print("Treeing Isocontours")
+    root = tree_isocontours({"guid": "root", "depth": 0, "children":[]}, isocontours)
 
     region_tree = segment_tree(root)
     set_node_types(region_tree)
@@ -782,15 +796,15 @@ def fill_layer_with_spiral(t, shape, z, start_pnt):
     # slice the shape
     print("Generating Isocontours")
     precision = 300
-    root = {"guid": "root", "depth": 0, "children":[]}
     isocontours = []
     for curve_group in curves:
         isocontours = isocontours + curve_group
-        node = {"guid": curve_group, "depth": root["depth"]+1, "parent": root, "children":[]}
-        root["children"].append(node)
-        new_curves = get_isocontours(t, curve_group, node, precision)
+        new_curves = get_isocontours(t, curve_group, 1, precision)
         if new_curves:
             isocontours = isocontours + new_curves
+
+    print("Treeing Isocontours")
+    root = tree_isocontours({"guid": "root", "depth": 0, "children":[]}, isocontours)
 
     region_tree = segment_tree(root)
     set_node_types(region_tree)
@@ -846,13 +860,10 @@ def fill_layer_with_contours(t, shape, z):
     # slice the shape
     print("Generating Isocontours")
     precision = 300
-    root = {"guid": "root", "depth": 0, "children":[]}
     isocontours = []
     for curve_group in curves:
         isocontours = isocontours + curve_group
-        node = {"guid": curve_group, "depth": root["depth"]+1, "parent": root, "children":[]}
-        root["children"].append(node)
-        new_curves = get_isocontours(t, curve_group, node, precision)
+        new_curves = get_isocontours(t, curve_group, 1, precision)
         if new_curves:
             isocontours = isocontours + new_curves
 
