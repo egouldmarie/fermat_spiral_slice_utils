@@ -756,38 +756,33 @@ def fill_layer_with_fermat_spiral(t, shape, z, start_pnt=None, wall_mode=False, 
 
     print(len(root['children']), len(get_all_nodes(root))-1)
 
-    return root
+    for child in root['children']:
+        region_tree = segment_tree(child)
+        set_node_types(region_tree)
+        all_nodes = get_all_nodes(region_tree)
 
-    region_tree = segment_tree(root)
-    set_node_types(region_tree)
-    all_nodes = get_all_nodes(region_tree)
+        print("Spiralling Regions")
+        for node in all_nodes:
+            if len(node['curves']) > 0:
+                if node['type'] == 1:
+                    start_idx = None
+                    if start_pnt:
+                        print(node['curves'][0])
+                        start_idx = closest_point(start_pnt, rs.DivideCurve(node['curves'][0], precision))
+                    spiral, indices = spiral_contours(t, node["curves"], precision, start_idx)
+                    node["fermat_spiral"] = fermat_spiral(t, spiral, indices)
+                elif node['type'] == 2:
+                    node['fermat_spiral'] = rs.DivideCurve(node["curves"][0], precision)
 
-    print("Spiralling Regions")
-    for node in all_nodes:
-        if len(node['curves']) > 0:
-            if node['type'] == 1:
-                start_idx = None
-                if 'root' in node['curves']:
-                    node['curves'].remove('root')
-                if start_pnt:
-                    print(node['curves'][0])
-                    start_idx = closest_point(start_pnt, rs.DivideCurve(node['curves'][0], precision))
-                spiral, indices = spiral_contours(t, node["curves"], precision, start_idx)
-                node["fermat_spiral"] = fermat_spiral(t, spiral, indices)
-            elif node['type'] == 2:
-                node['fermat_spiral'] = rs.DivideCurve(node["curves"][0], precision)
-
-    print("Connecting Spiralled Regions")
-    travel_paths = []
-    final_spiral = connect_spiralled_nodes(t, region_tree)
-    t.pen_up()
-    travel_paths.append(rs.AddCurve([t.get_position(), final_spiral[0]]))
-    t.set_position(final_spiral[0].X, final_spiral[0].Y, final_spiral[0].Z)
-    t.pen_down()
-    for p in final_spiral:
-        t.set_position(p.X, p.Y, p.Z)
-
-    all_nodes = {node['guid']: node for node in all_nodes}
+        print("Connecting Spiralled Regions")
+        travel_paths = []
+        final_spiral = connect_spiralled_nodes(t, region_tree)
+        t.pen_up()
+        travel_paths.append(rs.AddCurve([t.get_position(), final_spiral[0]]))
+        t.set_position(final_spiral[0].X, final_spiral[0].Y, final_spiral[0].Z)
+        t.pen_down()
+        for p in final_spiral:
+            t.set_position(p.X, p.Y, p.Z)
 
     return travel_paths
 
