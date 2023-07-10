@@ -167,7 +167,6 @@ def get_isocontour(t, curves, precision):
             # remove sequences that consist of a single point
             for seq in sequences:
                 if len(seq) <= 1:
-                    print(seq)
                     sequences.remove(seq)
 
             # get start and end points of all sequences
@@ -497,20 +496,45 @@ def get_curve_groupings(curves):
     return curves
 
 
-def tree_isocontours(root, isocontours):
+def tree_isocontours(t, root, isocontours):
     # find outermost contours
-    all_points = [rs.DivideCurve(curve, 100) for curve in isocontours]
-    inside = {c:{c2:all([rs.PointInPlanarClosedCurve(p, isocontours[c2]) for p in all_points[c]]) for c2 in range(len(isocontours)) if c2 != c} for c in range(len(isocontours))}
-    outer_isocontours = [c for c in range(len(isocontours)) if not any([inside[c][k] for k in inside[c]])]
+    points = [rs.DivideCurve(curve, 100) for curve in isocontours]
+    inside = {c:{c2:all([rs.PointInPlanarClosedCurve(p, isocontours[c]) for p in points[c2]]) for c2 in range(len(isocontours)) if c2 != c} for c in range(len(isocontours))}
+    #for i in inside: print(i, inside[i])
 
-    for c in outer_isocontours:
-        node = {"guid":c, "depth":root["depth"]+1, "children":[]}
-        root["children"].append(node)
-        find_children(node, isocontours, inside)
+    node = {"guid":isocontours[0], "depth":root["depth"]+1, "children":[]}
+    root["children"].append(node)
+
+    has_parent = [False for i in range(len(isocontours))]
+    has_parent[0] = True
+    find_children(t, node, isocontours, points, inside, has_parent)
+    print(has_parent)
+
+    return root
 
 
-def find_children(parent, isocontours, inside):
-    print()
+def directly_inside(out_, in_, inside):
+    if out_ != in_:
+        if in_==1:
+            print('')
+            print(out_, in_)
+            print(inside[out_])
+            print(inside[in_][out_])
+            print([inside[idx3][in_] for idx3 in inside[out_] if idx3 != in_])
+        return inside[out_][in_] or (not inside[in_][out_] and not any([inside[idx3][in_] for idx3 in inside[out_] if idx3 != in_]))
+    return False
+
+
+def find_children(t, parent, isocontours, points, inside, has_parent):
+    offset = t.get_extrude_width()
+    pidx = isocontours.index(parent['guid'])
+    for i in range(len(isocontours)):
+        if i==1: print(i, pidx, directly_inside(pidx, i, inside))
+        if not has_parent[i] and directly_inside(pidx, i, inside) and any([rs.Distance(p, p2) <= offset*1.5 for p in points[pidx] for p2 in points[i]]):
+            node = {"guid":isocontours[i], "depth":parent["depth"]+1, "children":[]}
+            parent['children'].append(node)
+            has_parent[i] = True
+            find_children(t, node, isocontours, points, inside, has_parent)
 
 
 def connect_spiralled_nodes(t, root):
@@ -729,13 +753,19 @@ def fill_layer_with_fermat_spiral(t, shape, z, start_pnt=None, wall_mode=False, 
     precision = 300
     isocontours = []
     for curve_group in curves:
-        isocontours = isocontours + curve_group
+        isocontours.append(curve_group)
         new_curves = get_isocontours(t, curve_group, 1, precision, wall_mode, walls)
         if new_curves:
-            isocontours = isocontours + new_curves
+            isocontours[-1] = isocontours[-1] + new_curves
 
     print("Treeing Isocontours")
-    root = tree_isocontours({"guid": "root", "depth": 0, "children":[]}, isocontours)
+    root = {"guid": "root", "depth": 0, "children":[]}
+    for i in isocontours:
+        tree_isocontours(t, root, i)
+
+    print(len(root['children']), len(get_all_nodes(root))-1)
+
+    return root
 
     region_tree = segment_tree(root)
     set_node_types(region_tree)
