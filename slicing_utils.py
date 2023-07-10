@@ -500,7 +500,6 @@ def tree_isocontours(t, root, isocontours):
     # find outermost contours
     points = [rs.DivideCurve(curve, 100) for curve in isocontours]
     inside = {c:{c2:all([rs.PointInPlanarClosedCurve(p, isocontours[c]) for p in points[c2]]) for c2 in range(len(isocontours)) if c2 != c} for c in range(len(isocontours))}
-    #for i in inside: print(i, inside[i])
 
     node = {"guid":isocontours[0], "depth":root["depth"]+1, "children":[]}
     root["children"].append(node)
@@ -508,20 +507,13 @@ def tree_isocontours(t, root, isocontours):
     has_parent = [False for i in range(len(isocontours))]
     has_parent[0] = True
     find_children(t, node, isocontours, points, inside, has_parent)
-    print(has_parent)
 
     return root
 
 
 def directly_inside(out_, in_, inside):
     if out_ != in_:
-        if in_==1:
-            print('')
-            print(out_, in_)
-            print(inside[out_])
-            print(inside[in_][out_])
-            print([inside[idx3][in_] for idx3 in inside[out_] if idx3 != in_])
-        return inside[out_][in_] or (not inside[in_][out_] and not any([inside[idx3][in_] for idx3 in inside[out_] if idx3 != in_]))
+        return inside[out_][in_] or (not inside[in_][out_] and not any([inside[idx3][in_] for idx3 in inside[out_] if inside[out_][idx3] == True and idx3 != in_]))
     return False
 
 
@@ -529,7 +521,6 @@ def find_children(t, parent, isocontours, points, inside, has_parent):
     offset = t.get_extrude_width()
     pidx = isocontours.index(parent['guid'])
     for i in range(len(isocontours)):
-        if i==1: print(i, pidx, directly_inside(pidx, i, inside))
         if not has_parent[i] and directly_inside(pidx, i, inside) and any([rs.Distance(p, p2) <= offset*1.5 for p in points[pidx] for p2 in points[i]]):
             node = {"guid":isocontours[i], "depth":parent["depth"]+1, "children":[]}
             parent['children'].append(node)
